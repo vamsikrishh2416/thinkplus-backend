@@ -1,55 +1,60 @@
 const express = require('express');
-const { Pool } = require('pg');
-const cors = require('cors');
-app.use(cors());
+const cors = require('cors'); // Required to fix the CORS bug
+const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
 const app = express();
-app.use(require('cors')());
+
+// FIX: This allows your Vercel frontend to talk to this Render backend
+app.use(cors()); 
 app.use(express.json());
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL, // Get this from Supabase Settings -> Database
+const supabase = createClient(
+    process.env.SUPABASE_URL, 
+    process.env.SUPABASE_KEY
+);
+
+// Problem Statement 2: Heuristic AI Recommendation Logic
+app.get('/api/recommendations/:userId', async (req, res) => {
+    const { userId } = req.params;
+
+    try {
+        // Fetch last 3 quiz attempts for the heuristic calculation
+        const { data: attempts, error } = await supabase
+            .from('quiz_attempts')
+            .select('score')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(3);
+
+        if (error) throw error;
+
+        // Fallback if no data is found
+        if (!attempts || attempts.length === 0) {
+            return res.json({ 
+                averageScore: 0, 
+                recommendedPath: "Foundational (No data found)" 
+            });
+        }
+
+        // Heuristic Logic: Calculate average
+        const avgScore = attempts.reduce((acc, curr) => acc + curr.score, 0) / attempts.length;
+
+        // Determine Recommendation Path
+        let recommendation = "Intermediate";
+        if (avgScore > 80) recommendation = "Advanced";
+        if (avgScore < 50) recommendation = "Foundational";
+
+        res.json({ 
+            averageScore: avgScore, 
+            recommendedPath: recommendation 
+        });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Database connection failed' });
+    }
 });
 
-// The "AI" Recommendation Engine logic [cite: 78, 101]
-app.post('/api/recommend', async (req, res) => {
-  const { user_id } = req.body;
-
-  // 1. Get student's latest performance [cite: 89]
-  const attempts = await pool.query(
-    'SELECT score FROM quiz_attempts WHERE user_id = $1 ORDER BY timestamp DESC LIMIT 3',
-    [user_id]
-  );
-
-  const avgScore = attempts.rows.reduce((a, b) => a + b.score, 0) / (attempts.rows.length || 1);
-
-  // 2. Apply Rule-based Logic 
-  let adjustment = 'Stay';
-  let targetDifficulty = 'Beginner';
-
-  if (avgScore > 80) {
-      adjustment = 'Increase';
-      targetDifficulty = 'Intermediate'; // Logic to bump them up
-  } else if (avgScore < 50) {
-      adjustment = 'Decrease';
-      targetDifficulty = 'Beginner'; // Logic to review basics
-  }
-
-  // 3. Find a recommended topic [cite: 90]
-  const topic = await pool.query(
-    'SELECT * FROM topics WHERE difficulty = $1 LIMIT 1',
-    [targetDifficulty]
-  );
-
-  // 4. Return the Expected Output Format [cite: 107, 108, 112]
-  res.json({
-    student_id: user_id,
-    current_level: avgScore > 80 ? "Intermediate" : "Beginner",
-    recommended_topic: topic.rows[0]?.title || "General Basics",
-    difficulty_adjustment: adjustment
-  });
-});
-
-
-app.listen(3001, () => console.log('Server running on port 3001'));
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
