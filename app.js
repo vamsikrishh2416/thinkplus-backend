@@ -1,6 +1,7 @@
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
+app.use(cors());
 require('dotenv').config();
 
 const app = express();
@@ -49,5 +50,6 @@ app.post('/api/recommend', async (req, res) => {
     difficulty_adjustment: adjustment
   });
 });
+
 
 app.listen(3001, () => console.log('Server running on port 3001'));
